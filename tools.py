@@ -39,45 +39,47 @@ class _SetModeTool(BaseTool):
 
 
 class SetPowerSavingModeTool(_SetModeTool):
-    """切到省电档（默认档，最省）。"""
+    """切到省电档（门槛压低、换便宜模型）。"""
 
     tool_name: str = "set_mode_power_saving"
-    tool_description: str = "把自己切回「省电」档"
+    tool_description: str = "把自己切到「省电」档"
     name: str = "set_mode_power_saving"
     description: str = (
-        "把自己切回「省电」档：链接收着用——不再全知、反应慢半拍、话更少，也最省。"
-        "适合：群里很热闹但没人真的在跟你说话、你想安静待着、刚刚为了正事把链接调高过"
-        "现在可以收回来的时候。这是默认档，拿不准就待在这一档。"
+        "把自己切到「省电」档：直接开口的门槛被压低（更少主动接话），"
+        "能换的话模型也换成便宜的那个。"
+        "适合：群里很热闹但没人真的在跟你说话、你想安静看着、或者主人最近在省着用的时候。"
         "切换后不用跟人报告档位，也不要说自己在省电——你的反应和话量本身就能说明。"
     )
     target_mode: ClassVar[str] = modes.POWER_SAVING
 
 
 class SetNormalModeTool(_SetModeTool):
-    """切到常规档。"""
+    """切到常规档（默认档，什么都不改）。"""
 
     tool_name: str = "set_mode_normal"
     tool_description: str = "把自己切到「常规」档"
     name: str = "set_mode_normal"
     description: str = (
-        "把自己切到「常规」档：链接正常——看得见该看见的、反应和话量都按平时的样子来，"
-        "不刻意省也不额外加码。适合：日常闲聊、有人正常找你说话、需要跟上话题但还不必全开。"
+        "把自己切回「常规」档：一切按你平时的样子来——模型不动，开口的门槛也不动。"
+        "这是默认档：拿不准、或者刚刚为了什么事调整过自己，事情过去之后就切回这一档。"
+        "适合：日常闲聊、有人正常找你说话、需要跟上话题但还不必全开。"
         "切换后不用跟人报告档位。"
     )
     target_mode: ClassVar[str] = modes.NORMAL
 
 
 class SetInsightModeTool(_SetModeTool):
-    """切到洞悉档（链接全开，最愿意接话也最费）。"""
+    """切到洞悉档（门槛抬高、未读加成开放、稍微活跃）。"""
 
     tool_name: str = "set_mode_insight"
     tool_description: str = "把自己切到「洞悉」档"
     name: str = "set_mode_insight"
     description: str = (
-        "把自己切到「洞悉」档：链接全开——看得更全、接话更主动，也最费。"
+        "把自己切到「洞悉」档：看得更全、接话更主动、未读再多也更容易开口，"
+        "也会比平时稍微活跃一点——这一档最费。"
         "只在真的需要时用：主人（你最在意的那个人）需要你更用心的时候、话题是正事或重要的事、"
         "或者他情绪上需要被你好好接住的时候。"
-        "不要因为好玩、想炫技、被人哄两句就切过来；也不要一直挂在这一档。"
+        "不要因为好玩、想炫技、被人哄两句就切过来；这一档也不该一直挂着，用完切回常规。"
         "切换后不用跟人报告档位。"
     )
     target_mode: ClassVar[str] = modes.INSIGHT

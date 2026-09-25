@@ -70,8 +70,8 @@ MODES: dict[str, ModeSpec] = {
         key=POWER_SAVING,
         label="省电",
         tagline=(
-            "高消耗模型全换成便宜模型；直通概率与兴趣阈值都维持现状"
-            "—— 最省 token 的一档，也是默认档"
+            "把「直接开口」的门槛往下压（直通概率降低、阈值抬高），"
+            "高消耗模型也换成便宜模型（配了 cheap_model 的话）—— 更少主动接话、更省 token"
         ),
         aliases=(
             "power",
@@ -88,14 +88,17 @@ MODES: dict[str, ModeSpec] = {
     NORMAL: ModeSpec(
         key=NORMAL,
         label="常规",
-        tagline="模型沿用配置里的现有策略；基础直通概率 +0.10、兴趣值回复阈值 -0.05",
+        tagline=(
+            "维持你现在配置里的样子：模型不动，直通概率、未读加成、兴趣阈值一概不调"
+            "—— 装上插件后什么都不改就是这一档，也是默认档"
+        ),
         aliases=("standard", "default", "normalmode", "常规模式", "普通", "普通模式"),
     ),
     INSIGHT: ModeSpec(
         key=INSIGHT,
         label="洞悉",
         tagline=(
-            "常规之上再开放未读消息加成（默认 0.05/条），兴趣值回复阈值再降 0.05"
+            "在常规之上把直通概率往上抬、阈值往下放，并开放未读消息加成（默认 0.05/条）"
             "—— 最愿意接话的一档"
         ),
         aliases=("insight", "deep", "deepinsight", "洞悉模式", "洞察", "洞察模式"),
@@ -154,7 +157,7 @@ def mode_names() -> str:
 class Settings:
     """运行时设置。"""
 
-    default_mode: str = POWER_SAVING
+    default_mode: str = NORMAL
     state_key: str = "mode_switcher"
     debug_log: bool = False
 
@@ -172,7 +175,7 @@ class Settings:
     # 模型档位
     models_enabled: bool = True
     downgrade_mode: str = POWER_SAVING
-    cheap_model: str = "deepseek-v4-flash"
+    cheap_model: str = ""
     downgrade_tasks: list[str] = field(default_factory=list)
     keep_models: list[str] = field(default_factory=list)
 
@@ -183,6 +186,8 @@ class Settings:
     inject_texts: dict[str, str] = field(default_factory=dict)
     inject_include_mode_list: bool = True
     inject_guard: str = ""
+    inject_liveliness_mode: str = ""
+    inject_liveliness_text: str = ""
 
     # 自主切换（LLM 工具，见 tools.py）
     tools_enabled: bool = True
@@ -221,6 +226,13 @@ class Settings:
         """bot 能不能自己切到这一档。"""
 
         return bool(self.tools_enabled and str(mode) in set(self.tool_allowed_modes))
+
+    def liveliness_for(self, mode: str) -> str:
+        """这一档要额外注入的「活跃度」提示词（没有就是空串）。"""
+
+        if not self.inject_liveliness_mode or str(mode) != self.inject_liveliness_mode:
+            return ""
+        return str(self.inject_liveliness_text or "").strip()
 
 
 _settings: Settings | None = None
@@ -508,8 +520,16 @@ def _apply_models(mode: str, settings: Settings, result: ApplyResult) -> bool:
     if config is None:
         return False
 
-    names = list(dict.fromkeys([*_model_originals.keys(), *settings.downgrade_tasks]))
     downgrade = settings.downgrades_models(mode)
+    if downgrade and not settings.cheap_model:
+        _warn_once(
+            "cheap_model",
+            "「" + mode_label(settings.downgrade_mode) + "」档要换模型，但 config 里 "
+            "cheap_model 是空的——模型档位不动（只调直通门/阈值）。"
+            "填上你自己 config/model.toml 里的便宜模型名即可生效",
+        )
+
+    names = list(dict.fromkeys([*_model_originals.keys(), *settings.downgrade_tasks]))
     touched = False
 
     for name in names:
@@ -678,12 +698,16 @@ def describe(mode: str | None = None) -> str:
         )
         lines.append("    （兴趣值过滤没开时这一项不参与判定，先备着）")
 
+    # 活跃度助推（只挂在配置指定的那一档）
+    liveliness = settings.liveliness_for(key)
+    if liveliness:
+        lines.append(f"· 活跃度提示：已注入（{mode_label(key)} 档）")
+
     lines.append(
         "· 拨档：/模式 省电 ｜ /模式 常规 ｜ /模式 洞悉"
         "（只发 /模式 就是看这份状态）"
     )
     return "\n".join(lines)
-
 
 def help_text() -> str:
     """认不出参数时的帮助。"""

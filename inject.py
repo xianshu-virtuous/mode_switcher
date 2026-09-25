@@ -67,6 +67,12 @@ def text_for(mode: str, settings: modes.Settings) -> str:
     if body:
         lines.append(body)
 
+    # 「稍微活跃一点」的助推：只挂在配置指定的那一档（默认洞悉），
+    # 因为光把未读加成打开、语气上还是缩着的话，观感会不一致。
+    liveliness = settings.liveliness_for(str(mode))
+    if liveliness:
+        lines.append(liveliness)
+
     if settings.inject_include_mode_list:
         names = " / ".join(
             modes.MODES[key].label for key in modes.MODE_ORDER if key in modes.MODES

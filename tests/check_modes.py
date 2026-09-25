@@ -145,6 +145,33 @@ class FakeModelConfig:
         )
 
 
+def make_instance_config() -> "ModeSwitcherConfig":
+    """造一份「守岸人实例那一版」的配置（偏移与文案都特制过）。
+
+    通用默认值是给市场用户的（常规＝基线、cheap_model 留空）；
+    下面的数值场景全部按实例这一版跑，顺便证明「特制只发生在配置里」。
+    """
+
+    from mode_switcher.config import ModeSwitcherConfig
+
+    config = ModeSwitcherConfig()
+    config.plugin.default_mode = "power_saving"
+    config.reply_gate.power_saving_base_offset = 0.0
+    config.reply_gate.normal_base_offset = 0.1
+    config.reply_gate.insight_base_offset = 0.1
+    config.interest_threshold.power_saving_offset = 0.0
+    config.interest_threshold.normal_offset = -0.05
+    config.interest_threshold.insight_offset = -0.1
+    config.models.cheap_model = "deepseek-v4-flash"
+    config.inject.power_saving_text = (
+        "你此刻处于「省电」档：与泰缇斯的链接被调低、算力收着用——不再全知，"
+        "反应慢半拍……不是坏，只是省电。"
+    )
+    config.inject.normal_text = "你此刻处于「常规」档：链接正常——该知道的都知道。"
+    config.inject.insight_text = "你此刻处于「洞悉」档：链接全开——看得更全、接话更主动。"
+    return config
+
+
 def main() -> int:
     """入口。"""
 
@@ -218,21 +245,65 @@ def main() -> int:
         check("manifest 的 api_version 校验", False, f"取 PLUGIN_API_VERSIONS 失败：{exc!r}")
 
     # ── 3. 配置 → 设置 ─────────────────────────────────────────────────────
-    config = ModeSwitcherConfig()
+    # 先看「通用默认值」（发给用户的那一套）：常规＝基线、省电压低、洞悉放开
+    default_config = ModeSwitcherConfig()
+    default_settings = _build_settings(default_config)
+    check(
+        "通用默认档是常规（装上零影响）",
+        default_settings.default_mode == modes.NORMAL,
+        default_settings.default_mode,
+    )
+    check(
+        "通用默认：直通概率偏移 = -0.05 / 0.00 / +0.05",
+        abs(default_settings.base_offset(modes.POWER_SAVING) + 0.05) < 1e-9
+        and default_settings.base_offset(modes.NORMAL) == 0.0
+        and abs(default_settings.base_offset(modes.INSIGHT) - 0.05) < 1e-9,
+    )
+    check(
+        "通用默认：兴趣阈值偏移 = +0.05 / 0.00 / -0.05（门槛省电 > 常规 > 洞悉）",
+        abs(default_settings.threshold_offset(modes.POWER_SAVING) - 0.05) < 1e-9
+        and default_settings.threshold_offset(modes.NORMAL) == 0.0
+        and abs(default_settings.threshold_offset(modes.INSIGHT) + 0.05) < 1e-9,
+        f"{default_settings.threshold_offset(modes.POWER_SAVING)}/"
+        f"{default_settings.threshold_offset(modes.NORMAL)}/"
+        f"{default_settings.threshold_offset(modes.INSIGHT)}",
+    )
+    check(
+        "通用默认不预设厂商：cheap_model 为空",
+        default_settings.cheap_model == "",
+        repr(default_settings.cheap_model),
+    )
+    check(
+        "通用默认：只有洞悉开放未读加成，活跃度助推也挂在洞悉",
+        default_settings.opens_unread(modes.INSIGHT)
+        and not default_settings.opens_unread(modes.NORMAL)
+        and not default_settings.opens_unread(modes.POWER_SAVING)
+        and abs(default_settings.unread_open_value - 0.05) < 1e-9
+        and default_settings.inject_liveliness_mode == modes.INSIGHT
+        and bool(default_settings.liveliness_for(modes.INSIGHT)),
+    )
+    check(
+        "通用默认档位说明是通用的（不含守岸人专有词）",
+        "泰缇斯" not in default_settings.inject_texts[modes.POWER_SAVING]
+        and "泰缇斯" not in default_settings.inject_texts[modes.INSIGHT],
+    )
+
+    # 再按「守岸人实例那一版」的偏移搭场景（数值断言沿用她那套）
+    config = make_instance_config()
     settings = _build_settings(config)
     check(
-        "默认档是省电",
+        "实例特制：默认档是省电",
         settings.default_mode == modes.POWER_SAVING,
         settings.default_mode,
     )
     check(
-        "直通概率偏移 = 0.00 / +0.10 / +0.10",
+        "实例特制：直通概率偏移 = 0.00 / +0.10 / +0.10",
         settings.base_offset(modes.POWER_SAVING) == 0.0
         and abs(settings.base_offset(modes.NORMAL) - 0.1) < 1e-9
         and abs(settings.base_offset(modes.INSIGHT) - 0.1) < 1e-9,
     )
     check(
-        "兴趣阈值偏移 = 0.00 / -0.05 / -0.10",
+        "实例特制：兴趣阈值偏移 = 0.00 / -0.05 / -0.10",
         settings.threshold_offset(modes.POWER_SAVING) == 0.0
         and abs(settings.threshold_offset(modes.NORMAL) + 0.05) < 1e-9
         and abs(settings.threshold_offset(modes.INSIGHT) + 0.1) < 1e-9,
@@ -360,6 +431,31 @@ def main() -> int:
     modes.apply(modes.POWER_SAVING)
     check("重复应用同一档位结果不变（幂等）", snapshot() == before)
 
+    # ── 5.5 cheap_model 留空（通用用户的默认状态）：省电档只调门、不换模型 ──
+    empty_settings = _build_settings(ModeSwitcherConfig())
+    empty_chatter = FakeChatterConfig()
+    empty_model_config = FakeModelConfig()
+    modes._plugin_config = lambda target_plugin: empty_chatter  # type: ignore[assignment]
+    modes._model_config = lambda: empty_model_config  # type: ignore[assignment]
+    modes.reset_snapshots()
+    modes.configure(empty_settings)
+    modes.apply(modes.POWER_SAVING)
+    check(
+        "cheap_model 留空时省电档不动模型",
+        list(empty_model_config.model_tasks.get_task("actor").model_list)
+        == ["deepseek-v4-flash", "deepseek-v4-pro"],
+        f"{empty_model_config.model_tasks.get_task('actor').model_list}",
+    )
+    check(
+        "cheap_model 留空时门槛照样压（0.03-0.05 钳到 0.00）",
+        float(empty_chatter.plugin.programmatic_probability.base_bypass_probability) == 0.0,
+        f"{empty_chatter.plugin.programmatic_probability.base_bypass_probability}",
+    )
+    # 还原：回到实例那一版的替身（替身数值一直没被这次实验碰过）
+    modes._plugin_config = lambda target_plugin: chatter  # type: ignore[assignment]
+    modes._model_config = lambda: model_config  # type: ignore[assignment]
+    modes.configure(settings)
+
     # ── 6. 还原 ────────────────────────────────────────────────────────────
     modes.restore()
     restored = snapshot()
@@ -437,7 +533,7 @@ def main() -> int:
         cwd = os.getcwd()
         os.chdir(tmp)
         try:
-            load_config = ModeSwitcherConfig()
+            load_config = make_instance_config()
             load_config.plugin.state_key = "mode_switcher_load_check"
             loaded_plugin = ModeSwitcherPlugin(load_config)
 
@@ -517,6 +613,35 @@ def main() -> int:
         "不是要念出来的台词" in power_text
         and "0.13" not in insight_text
         and "deepseek" not in power_text,
+    )
+
+    # 「稍微活跃一点」的助推：只在配置指定的那一档（默认洞悉）
+    lively = modes.Settings(
+        inject_liveliness_mode=modes.INSIGHT,
+        inject_liveliness_text="稍微活跃一点的助推",
+        inject_texts={modes.INSIGHT: "洞悉说明", modes.NORMAL: "常规说明"},
+    )
+    check(
+        "活跃度助推只在洞悉档出现",
+        "稍微活跃一点的助推" in inject.text_for(modes.INSIGHT, lively)
+        and "稍微活跃一点的助推" not in inject.text_for(modes.NORMAL, lively)
+        and "稍微活跃一点的助推" not in inject.text_for(modes.POWER_SAVING, lively),
+    )
+    check(
+        "助推留空 / 挂别的档都行",
+        inject.text_for(modes.INSIGHT, modes.Settings(inject_liveliness_mode="")).count(
+            "活跃"
+        )
+        == 0
+        and "助推"
+        in inject.text_for(
+            modes.NORMAL,
+            modes.Settings(inject_liveliness_mode=modes.NORMAL, inject_liveliness_text="助推"),
+        ),
+    )
+    check(
+        "状态文本会标出助推挂在哪一档",
+        "活跃度提示" in modes.describe(modes.INSIGHT),
     )
     custom = modes.Settings(
         inject_texts={modes.INSIGHT: "自定义说明"},

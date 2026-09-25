@@ -3,7 +3,7 @@
 加载时做三件事：
 
 1. 把插件配置翻译成运行时设置（:func:`_build_settings`）；
-2. 读档位存档（读不到就用配置里的默认档，默认省电）并**应用**：
+2. 读档位存档（读不到就用配置里的默认档，默认**常规**＝维持原样）并**应用**：
    模型档位 + 直通概率（+ 可选的兴趣值回复阈值）一次改到位，
    同时把「当前在哪一档」写进 system reminder（:mod:`inject`）——
    模型自己看不见档位，不告诉它就只能靠猜；
@@ -87,6 +87,8 @@ def _build_settings(config: ModeSwitcherConfig) -> modes.Settings:
         },
         inject_include_mode_list=bool(inject.include_mode_list),
         inject_guard=str(inject.guard or ""),
+        inject_liveliness_mode=str(inject.liveliness_mode or "").strip(),
+        inject_liveliness_text=str(inject.liveliness_text or ""),
         tools_enabled=bool(tools.enabled),
         tool_allowed_modes=[
             key
@@ -110,14 +112,16 @@ class ModeSwitcherPlugin(BasePlugin):
     plugin_name: str = "mode_switcher"
     plugin_description: str = (
         "一个三档开关，同时拨动「模型档位」与「开口频率」："
-        "省电档把高消耗模型换成便宜模型、直通概率与兴趣阈值维持现状（默认档、最省 token）；"
-        "常规档沿用配置里的模型策略、基础直通概率 +0.10、兴趣值回复阈值 -0.05；"
-        "洞悉档在常规之上再开放未读消息加成（默认 0.05/条）、阈值再降 0.05。"
+        "常规档＝维持你配置里的原值（默认档，装上什么都不改就是这一档）；"
+        "省电档把直接开口的门槛压低（基础直通概率 -0.05、兴趣阈值 +0.05），"
+        "并把高消耗模型换成你自己指定的便宜模型（cheap_model）；"
+        "洞悉档反过来（直通概率 +0.05、阈值 -0.05），开放未读消息加成，"
+        "并可选注入一句「稍微活跃一点」的提示。"
         "换档时把「当前在哪一档」注入 system reminder，bot 自己知道状态；"
         "另给 bot 三个工具，让它按情况自己调档（白名单 + 冷却可配）；"
         "只改内存配置对象、不写配置文件，重启回落、卸载还原；/模式 随时拨档"
     )
-    plugin_version: str = "1.2.0"
+    plugin_version: str = "1.3.0"
     configs: list[type] = [ModeSwitcherConfig]
 
     def __init__(self, config: object = None) -> None:
