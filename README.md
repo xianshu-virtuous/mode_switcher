@@ -216,16 +216,20 @@ announce_text = ""
 默认文案是**通用**的（不绑任何角色）。要让三档带上自己角色的味道，
 就在 `[inject]` 里把那三段文本整段改掉——注入只认文本，不认人设。
 
-项目里的守岸人实例是这么特制的（**只存在它的实例配置里，不在插件里**）：
+一个实际调过的例子（**这一切只存在于那份实例配置里，插件本体不含任何角色**）：
+默认档直接设成省电、省电档偏移填 `0.0`（因为那个实例的基础概率本来就压得很低）、
+常规/洞悉分别 `+0.10`，`cheap_model` 用自己实际在用的那个模型，
+三段注入文案改成该角色的说法（「链接被调低」那一类），
+活跃度助推也换成更贴角色的措辞：
 
 ```toml
 [plugin]
-default_mode = "power_saving"      # 她的默认就是省电
+default_mode = "power_saving"      # 这个实例的默认就是省电
 
 [reply_gate]
-power_saving_base_offset = 0.0     # 她的「省电」＝她现在这个低概率（0.03），所以不动
-normal_base_offset = 0.1           # 常规 +0.10
-insight_base_offset = 0.1          # 洞悉 +0.10
+power_saving_base_offset = 0.0     # 它的「省电」＝已经压低的现状，所以不动
+normal_base_offset = 0.1
+insight_base_offset = 0.1
 
 [interest_threshold]
 power_saving_offset = 0.0
@@ -233,12 +237,13 @@ normal_offset = -0.05
 insight_offset = -0.1
 
 [models]
-cheap_model = "deepseek-v4-flash"
+cheap_model = "<你自己的便宜模型名>"
 
 [inject]
-power_saving_text = "你此刻处于「省电」档：与泰缇斯的链接被调低、算力收着用……不是坏，只是省电。"
-normal_text = "你此刻处于「常规」档：链接正常……"
-insight_text = "你此刻处于「洞悉」档：链接全开——泰缇斯的记录与黑海岸的数据都在手边……"
+power_saving_text = "你此刻处于「省电」档：<按你的角色改，比如能力/算力被调低>……"
+normal_text = "你此刻处于「常规」档：<正常状态>……"
+insight_text = "你此刻处于「洞悉」档：<全力运转>……"
+liveliness_text = "这一档你可以比平时稍微活跃一点：<按你的角色改>……"
 ```
 
 ## 九、安装

@@ -82,7 +82,7 @@ def check(name: str, ok: bool, extra: str = "") -> bool:
 
 
 class FakeProbSection:
-    """default_chatter 的 programmatic_probability 节（守岸人现值）。"""
+    """default_chatter 的 programmatic_probability 节（取一个真实的低概率实例值）。"""
 
     def __init__(self) -> None:
         self.base_bypass_probability = 0.03
@@ -129,7 +129,7 @@ class FakeTasksSection:
 
 
 class FakeModelConfig:
-    """守岸人的 model.toml 摘录。"""
+    """一份 model.toml 摘录（actor/sub_actor 都是 flash + pro 这种混搭）。"""
 
     def __init__(self) -> None:
         self.model_tasks = FakeTasksSection(
@@ -146,10 +146,11 @@ class FakeModelConfig:
 
 
 def make_instance_config() -> "ModeSwitcherConfig":
-    """造一份「守岸人实例那一版」的配置（偏移与文案都特制过）。
+    """造一份「实例特制过」的配置（偏移与文案都改过，不等于通用默认）。
 
     通用默认值是给市场用户的（常规＝基线、cheap_model 留空）；
-    下面的数值场景全部按实例这一版跑，顺便证明「特制只发生在配置里」。
+    下面的数值场景全部按这份特制配置跑，顺便证明「特制只发生在配置里、插件不含角色」。
+    文案用测试标记而不是某个角色的设定——插件仓库不该带任何人的 flavor。
     """
 
     from mode_switcher.config import ModeSwitcherConfig
@@ -163,12 +164,9 @@ def make_instance_config() -> "ModeSwitcherConfig":
     config.interest_threshold.normal_offset = -0.05
     config.interest_threshold.insight_offset = -0.1
     config.models.cheap_model = "deepseek-v4-flash"
-    config.inject.power_saving_text = (
-        "你此刻处于「省电」档：与泰缇斯的链接被调低、算力收着用——不再全知，"
-        "反应慢半拍……不是坏，只是省电。"
-    )
-    config.inject.normal_text = "你此刻处于「常规」档：链接正常——该知道的都知道。"
-    config.inject.insight_text = "你此刻处于「洞悉」档：链接全开——看得更全、接话更主动。"
+    config.inject.power_saving_text = "自定义省电说明：这一档收着用（标记 POWER）。"
+    config.inject.normal_text = "自定义常规说明（标记 NORMAL）。"
+    config.inject.insight_text = "自定义洞悉说明：这一档全开（标记 INSIGHT）。"
     return config
 
 
@@ -283,12 +281,13 @@ def main() -> int:
         and bool(default_settings.liveliness_for(modes.INSIGHT)),
     )
     check(
-        "通用默认档位说明是通用的（不含守岸人专有词）",
+        "通用默认档位说明是通用的（不含任何角色专有词）",
         "泰缇斯" not in default_settings.inject_texts[modes.POWER_SAVING]
-        and "泰缇斯" not in default_settings.inject_texts[modes.INSIGHT],
+        and "泰缇斯" not in default_settings.inject_texts[modes.INSIGHT]
+        and "链接" not in default_settings.inject_texts[modes.POWER_SAVING],
     )
 
-    # 再按「守岸人实例那一版」的偏移搭场景（数值断言沿用她那套）
+    # 再按「特制实例那一版」的偏移搭场景（数值断言沿用那一套）
     config = make_instance_config()
     settings = _build_settings(config)
     check(
@@ -585,8 +584,8 @@ def main() -> int:
             check(
                 "换档后注入内容跟着换（洞悉）",
                 "洞悉" in insight_injected
-                and "链接全开" in insight_injected
-                and "只是省电" not in insight_injected,
+                and "标记 INSIGHT" in insight_injected
+                and "标记 POWER" not in insight_injected,
                 insight_injected.splitlines()[0] if insight_injected else "（没写进去）",
             )
             asyncio.run(reloaded_plugin.on_plugin_unloaded())
@@ -601,12 +600,14 @@ def main() -> int:
     check(
         "注入文本带档位名 + 该档说明 + 三档清单",
         "省电" in power_text
-        and "只是省电" in power_text
+        and "标记 POWER" in power_text
         and all(word in power_text for word in ("省电", "常规", "洞悉")),
     )
     check(
         "洞悉档的注入不带省电那套说法",
-        "洞悉" in insight_text and "链接全开" in insight_text and "只是省电" not in insight_text,
+        "洞悉" in insight_text
+        and "标记 INSIGHT" in insight_text
+        and "标记 POWER" not in insight_text,
     )
     check(
         "防背书：注入不写具体参数、并声明不是台词",
