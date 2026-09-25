@@ -23,6 +23,12 @@ NEO_ROOT = Path(os.environ.get("NEO_ROOT", r"F:\Neo-MoFox-Shorekeeper")).resolve
 PLUGIN_REPO = Path(__file__).resolve().parents[2]
 PLUGIN_DIR = PLUGIN_REPO / "mode_switcher"
 
+# GBK 控制台下打中文/符号会抛 UnicodeEncodeError，让「断言全过」变成 exit 1（RISKS.md R14）
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+except Exception:  # noqa: BLE001
+    pass
+
 _failures: list[str] = []
 
 
