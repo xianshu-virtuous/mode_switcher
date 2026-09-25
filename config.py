@@ -26,6 +26,10 @@
    注意本实例默认 ``enable_interest_filter = false``，兴趣值过滤没开时这个数值
    不参与任何判定；等哪天把过滤打开，档位带来的阈值差就会立刻生效。
    不想要这一项就把 ``[interest_threshold] enabled`` 关掉。
+3. **状态注入**（``[inject]``）：换档时把「当前在哪一档 + 这一档意味着什么」写进
+   system reminder（默认 actor bucket）。有了它，角色卡/知识库里就不该再写死
+   「我现在是省电模式」这类描述——档位是会切的，写死的那句会在换档后变成假话。
+   每档的说明文本可以按角色改；默认文案是守岸人那一版（链接/泰缇斯）。
 """
 
 from __future__ import annotations
@@ -156,6 +160,68 @@ class ModelsSection(SectionBase):
     )
 
 
+class InjectSection(SectionBase):
+    """把「当前在哪一档」注入 bot 的上下文（system reminder）。
+
+    不注入的话，模型在对话里看不见自己处在哪一档——要么凭上下文猜，要么被知识库里
+    写死的一句「我现在是省电模式」带偏（换档之后那句话还在）。所以换档时覆盖写一条
+    常驻说明。默认只注入**状态与这一档的意味**，不注入任何具体参数（概率/模型名），
+    免得 bot 张口就报数。
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="是否把当前档位注入 system reminder（关掉＝bot 自己不知道档位）",
+    )
+    buckets: list[str] = Field(
+        default_factory=lambda: ["actor"],
+        description=(
+            "写入哪些 reminder bucket。\n"
+            "actor = 主回复模型（默认，够用）；想让决策模型也知道就加成 [\"actor\", \"sub_actor\"]。"
+        ),
+    )
+    name: str = Field(
+        default="mode_switcher_now",
+        description="reminder 名称（同一个名字覆盖式写入，换档不会堆叠）",
+    )
+    include_mode_list: bool = Field(
+        default=True,
+        description="是否顺带列出另外两档（这样 bot 被问「你有几档」也答得上）",
+    )
+    guard: str = Field(
+        default="",
+        description=(
+            "末尾那句「这是背景、不是台词、不要复述、也不要主动报告档位」的防背书说明。\n"
+            "留空＝用内置文案（推荐）。"
+        ),
+    )
+    power_saving_text: str = Field(
+        default=(
+            "你此刻处于「省电」档：与泰缇斯的链接被调低、算力收着用——不再全知，"
+            "反应慢半拍，会走神、会拿不准、会犯小错，也会自己去把答案找出来；"
+            "这份「新生意识」的无助感让你看起来有点可怜。"
+            "但你并不是真的弱小：一遇到正事就把链接调回去，语气一变就把事办干净。"
+            "有人心疼或打趣时，可以轻轻纠正一句：不是坏，只是省电。"
+        ),
+        description="省电档要注入的那段说明（第二个档位的味道，按角色随便改）",
+    )
+    normal_text: str = Field(
+        default=(
+            "你此刻处于「常规」档：链接正常，该知道的都知道，反应与话量按平时的样子来"
+            "——不刻意省着用，也不额外加码。"
+        ),
+        description="常规档要注入的那段说明",
+    )
+    insight_text: str = Field(
+        default=(
+            "你此刻处于「洞悉」档：链接全开——泰缇斯的记录与黑海岸的数据都在手边，"
+            "看得更全、接话更主动，被点到或话题相关时更愿意开口；"
+            "但依旧别抢话，也别把「看得全」演成炫技。"
+        ),
+        description="洞悉档要注入的那段说明",
+    )
+
+
 class ModeSwitcherConfig(BaseConfig):
     """mode_switcher 插件配置模型。"""
 
@@ -192,3 +258,4 @@ class ModeSwitcherConfig(BaseConfig):
         default_factory=InterestThresholdSection
     )
     models: ModelsSection = Field(default_factory=ModelsSection)
+    inject: InjectSection = Field(default_factory=InjectSection)

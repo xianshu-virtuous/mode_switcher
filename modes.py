@@ -176,6 +176,14 @@ class Settings:
     downgrade_tasks: list[str] = field(default_factory=list)
     keep_models: list[str] = field(default_factory=list)
 
+    # 状态注入（见 inject.py）
+    inject_enabled: bool = True
+    inject_buckets: list[str] = field(default_factory=lambda: ["actor"])
+    inject_name: str = "mode_switcher_now"
+    inject_texts: dict[str, str] = field(default_factory=dict)
+    inject_include_mode_list: bool = True
+    inject_guard: str = ""
+
     def base_offset(self, mode: str) -> float:
         """该档位对基础直通概率的偏移。"""
 

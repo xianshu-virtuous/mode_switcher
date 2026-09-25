@@ -4,7 +4,9 @@
 
 1. 把插件配置翻译成运行时设置（:func:`_build_settings`）；
 2. 读档位存档（读不到就用配置里的默认档，默认省电）并**应用**：
-   模型档位 + 直通概率（+ 可选的兴趣值回复阈值）一次改到位；
+   模型档位 + 直通概率（+ 可选的兴趣值回复阈值）一次改到位，
+   同时把「当前在哪一档」写进 system reminder（:mod:`inject`）——
+   模型自己看不见档位，不告诉它就只能靠猜；
 3. 目标聊天插件（默认 ``default_chatter``）比自己晚加载时，开一个
    轮询补应用任务 —— 插件加载顺序是拓扑排序 + 字母序，正常情况下
    ``default_chatter`` 在 ``mode_switcher`` 之前，用不到这条兜底。
@@ -37,6 +39,7 @@ def _build_settings(config: ModeSwitcherConfig) -> modes.Settings:
     gate = config.reply_gate
     threshold = config.interest_threshold
     models_cfg = config.models
+    inject = config.inject
 
     return modes.Settings(
         default_mode=str(plugin.default_mode or "").strip(),
@@ -66,6 +69,19 @@ def _build_settings(config: ModeSwitcherConfig) -> modes.Settings:
         keep_models=[
             str(model).strip() for model in models_cfg.keep_models if str(model).strip()
         ],
+        inject_enabled=bool(inject.enabled),
+        inject_buckets=[
+            str(bucket).strip() for bucket in inject.buckets if str(bucket).strip()
+        ]
+        or ["actor"],
+        inject_name=str(inject.name or "mode_switcher_now").strip(),
+        inject_texts={
+            modes.POWER_SAVING: str(inject.power_saving_text or ""),
+            modes.NORMAL: str(inject.normal_text or ""),
+            modes.INSIGHT: str(inject.insight_text or ""),
+        },
+        inject_include_mode_list=bool(inject.include_mode_list),
+        inject_guard=str(inject.guard or ""),
     )
 
 
@@ -79,9 +95,10 @@ class ModeSwitcherPlugin(BasePlugin):
         "省电档把高消耗模型换成便宜模型、直通概率与兴趣阈值维持现状（默认档、最省 token）；"
         "常规档沿用配置里的模型策略、基础直通概率 +0.10、兴趣值回复阈值 -0.05；"
         "洞悉档在常规之上再开放未读消息加成（默认 0.05/条）、阈值再降 0.05。"
+        "换档时把「当前在哪一档」注入 system reminder，bot 自己知道状态；"
         "只改内存配置对象、不写配置文件，重启回落、卸载还原；/模式 随时拨档"
     )
-    plugin_version: str = "1.0.0"
+    plugin_version: str = "1.1.0"
     configs: list[type] = [ModeSwitcherConfig]
 
     def __init__(self, config: object = None) -> None:
@@ -115,6 +132,7 @@ class ModeSwitcherPlugin(BasePlugin):
         logger.info(
             f"mode_switcher: 档位＝{modes.mode_label(mode)}"
             f"｜已生效：{result.summary()}{detail}"
+            f"｜状态注入：{'开' if runtime.settings().inject_enabled else '关'}"
         )
 
         if runtime.settings().gate_enabled and not result.gate:

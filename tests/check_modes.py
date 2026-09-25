@@ -32,6 +32,40 @@ except Exception:  # noqa: BLE001
 _failures: list[str] = []
 
 
+class FakeReminderStore:
+    """替身：system reminder store（只记账，不碰真框架）。"""
+
+    def __init__(self) -> None:
+        self.items: dict[tuple[str, str], dict[str, Any]] = {}
+        self.deleted: list[tuple[str, str]] = []
+
+    def set(
+        self,
+        bucket: str,
+        name: str,
+        content: str,
+        insert_type: str | None = None,
+        consume: str | None = None,
+    ) -> None:
+        self.items[(bucket, name)] = {
+            "content": content,
+            "insert_type": insert_type,
+            "consume": consume,
+        }
+
+    def delete(self, bucket: str, name: str) -> bool:
+        self.deleted.append((bucket, name))
+        self.items.pop((bucket, name), None)
+        return True
+
+    def get(self, bucket: str, names: list[str] | None = None) -> str:
+        return "\n\n".join(
+            f"[{name}]\n{payload['content']}"
+            for (item_bucket, name), payload in self.items.items()
+            if item_bucket == bucket
+        )
+
+
 def check(name: str, ok: bool, extra: str = "") -> bool:
     """打印一条检查结果。"""
 
@@ -124,7 +158,7 @@ def main() -> int:
 
     # ── 1. 真实框架导入冒烟 ────────────────────────────────────────────────
     try:
-        from mode_switcher import modes, runtime, state
+        from mode_switcher import inject, modes, runtime, state
         from mode_switcher.commands import ModeCommand
         from mode_switcher.config import ModeSwitcherConfig
         from mode_switcher.plugin import ModeSwitcherPlugin, _build_settings
@@ -390,6 +424,9 @@ def main() -> int:
             os.chdir(cwd)
 
     # ── 10. 加载 / 卸载路径（on_plugin_loaded → 应用，卸载 → 还原） ────────
+    real_store_fn = inject._store
+    reminder_store = FakeReminderStore()
+    inject._store = lambda: reminder_store  # type: ignore[assignment]
     with tempfile.TemporaryDirectory() as tmp:
         cwd = os.getcwd()
         os.chdir(tmp)
@@ -409,6 +446,18 @@ def main() -> int:
                 list(actor.model_list) == ["deepseek-v4-flash"],
                 f"{actor.model_list}",
             )
+            key = (load_config.inject.buckets[0], load_config.inject.name)
+            injected = reminder_store.items.get(key, {}).get("content", "")
+            check(
+                "加载即写入档位 reminder（含档位与防背书说明）",
+                "省电" in injected and "不是要念出来的台词" in injected,
+                injected.splitlines()[0] if injected else "（没写进去）",
+            )
+            check(
+                "reminder 是常驻且固定的那一种",
+                reminder_store.items.get(key, {}).get("insert_type") == "fixed"
+                and reminder_store.items.get(key, {}).get("consume") == "forever",
+            )
 
             asyncio.run(loaded_plugin.on_plugin_unloaded())
             check(
@@ -418,6 +467,7 @@ def main() -> int:
                 and abs(float(interest.reply_threshold) - 0.78) < 1e-9,
                 f"{actor.model_list}｜{prob.base_bypass_probability}｜{interest.reply_threshold}",
             )
+            check("卸载即清掉档位 reminder", key in reminder_store.deleted, f"{reminder_store.deleted}")
 
             asyncio.run(state.save("mode_switcher_load_check", modes.INSIGHT))
             reloaded_plugin = ModeSwitcherPlugin(load_config)
@@ -429,11 +479,87 @@ def main() -> int:
                 and abs(float(prob.unread_message_bonus) - 0.05) < 1e-9,
                 f"{modes.current_mode()}｜{prob.base_bypass_probability}｜{prob.unread_message_bonus}",
             )
+            insight_injected = reminder_store.items.get(key, {}).get("content", "")
+            check(
+                "换档后注入内容跟着换（洞悉）",
+                "洞悉" in insight_injected
+                and "链接全开" in insight_injected
+                and "只是省电" not in insight_injected,
+                insight_injected.splitlines()[0] if insight_injected else "（没写进去）",
+            )
             asyncio.run(reloaded_plugin.on_plugin_unloaded())
         finally:
             os.chdir(cwd)
 
-    # ── 11. 组件注册表（可选，需要框架 registry 就绪） ─────────────────────
+    # ── 10.5 注入文本本身 ──────────────────────────────────────────────────
+    modes.reset_snapshots()
+    modes.configure(settings)
+    power_text = inject.text_for(modes.POWER_SAVING, settings)
+    insight_text = inject.text_for(modes.INSIGHT, settings)
+    check(
+        "注入文本带档位名 + 该档说明 + 三档清单",
+        "省电" in power_text
+        and "只是省电" in power_text
+        and all(word in power_text for word in ("省电", "常规", "洞悉")),
+    )
+    check(
+        "洞悉档的注入不带省电那套说法",
+        "洞悉" in insight_text and "链接全开" in insight_text and "只是省电" not in insight_text,
+    )
+    check(
+        "防背书：注入不写具体参数、并声明不是台词",
+        "不是要念出来的台词" in power_text
+        and "0.13" not in insight_text
+        and "deepseek" not in power_text,
+    )
+    custom = modes.Settings(
+        inject_texts={modes.INSIGHT: "自定义说明"},
+        inject_include_mode_list=False,
+        inject_guard="自定义守卫",
+    )
+    custom_text = inject.text_for(modes.INSIGHT, custom)
+    check(
+        "文案可在配置里整段替换",
+        "自定义说明" in custom_text and "自定义守卫" in custom_text and "可用档位" not in custom_text,
+    )
+    check(
+        "注入开关关掉时不写 reminder",
+        inject.sync(modes.NORMAL, modes.Settings(inject_enabled=False)) is False,
+    )
+    multi_buckets = modes.Settings(inject_buckets=["actor", "sub_actor"])
+    inject.sync(modes.NORMAL, multi_buckets)
+    check(
+        "多 bucket 时逐个写",
+        all(
+            (bucket, multi_buckets.inject_name) in reminder_store.items
+            for bucket in ("actor", "sub_actor")
+        ),
+        f"{sorted(key[0] for key in reminder_store.items)}",
+    )
+
+    # ── 11. 真实 reminder store 往返（就在进程内存里，不落盘） ─────────────
+    try:
+        from src.app.plugin_system.api import prompt_api
+
+        inject._store = real_store_fn
+        inject.sync(modes.INSIGHT, settings)
+        roundtrip = prompt_api.get_system_reminder("actor", ["mode_switcher_now"])
+        check(
+            "真实 reminder store 往返成功",
+            "洞悉" in roundtrip and "不是要念出来的台词" in roundtrip,
+            f"{len(roundtrip)} 字符",
+        )
+        inject.clear(settings)
+        check(
+            "真实 store 里也能删干净",
+            "洞悉" not in prompt_api.get_system_reminder("actor", ["mode_switcher_now"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SKIP] 真实 reminder store 往返（框架未初始化，属正常）：{exc!r}")
+    finally:
+        inject._store = lambda: reminder_store  # type: ignore[assignment]
+
+    # ── 12. 组件注册表（可选，需要框架 registry 就绪） ─────────────────────
     try:
         from src.core.components.registry import get_global_registry
 

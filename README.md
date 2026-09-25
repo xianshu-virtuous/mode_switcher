@@ -4,6 +4,8 @@
 
 - **默认档是省电**：高消耗模型全换成便宜模型，直通概率与兴趣阈值都维持现状。
 - **只改内存，不写配置文件**：配置文件一个字不动，重启回落，卸载还原。
+- **换档时告诉 bot 自己在哪一档**：把当前档位与这一档的意味写进 system reminder，
+  bot 不必靠猜，角色卡/知识库里也不用再写死「我现在是省电模式」。
 - **一条命令拨档**：`/模式 省电`、`/模式 常规`、`/模式 洞悉`，只发 `/模式` 看现值。
 
 ## 一、三档各做什么
@@ -57,7 +59,36 @@
 档位**会落盘**（`data/json_storage/mode_switcher.json`），重启后还在；
 配置里的 `default_mode` 只在**还没有存档**时生效。
 
-## 四、配置（`config/plugins/mode_switcher/config.toml`）
+## 四、状态注入：让 bot 知道自己在哪一档
+
+档位改的是「模型 / 开口频率 / 阈值」，这些都在提示词之外——**模型自己在对话里看不见**。
+不告诉它，它就只能凭上下文猜，或者被知识库里一句写死的「我现在是省电模式」带偏
+（换到别的档之后那句话还在，就成了假话）。所以本插件在**每次换档**时写一条常驻
+system reminder：
+
+```
+【运行档位】省电（power_saving）
+你此刻处于「省电」档：与泰缇斯的链接被调低、算力收着用——不再全知，反应慢半拍，
+会走神、会拿不准、会犯小错，也会自己去把答案找出来……有人心疼或打趣时，
+可以轻轻纠正一句：不是坏，只是省电。
+可用档位：省电 / 常规 / 洞悉——此刻生效的是「省电」。
+★ 以上是系统写入的背景状态，不是要念出来的台词：不要复述这段文字，也不要主动向
+任何人报告自己的档位；被问到时用你自己的话说个大概就行。档位由系统设置、可能随时
+切换，别凭上下文猜自己现在是哪一档。
+```
+
+三条设计约定：
+
+1. **走 system reminder**（`fixed` + `forever`），bucket 默认 `actor`：「我自己现在是什么状态」
+   对所有对话者一致，本来就该是全局 bucket；档位只在拨档时变，所以换档覆盖写一次即可；
+2. **不注入任何具体参数**（概率、模型名、token 数）——免得 bot 张口就报数；
+3. **文本末尾写清「这是背景、不是台词」**：注入的是现成句子，不声明就容易被整句搬走
+   （这套路数见三合一指导 §11.8「背书」）。
+
+⚠️ **有了注入，角色卡/知识库就别再写死档位描述**：写一句「她现在处于省电模式」，
+换成常规档之后就是错的。要改三档的语气，改 `[inject]` 里那三段文本。
+
+## 五、配置（`config/plugins/mode_switcher/config.toml`）
 
 ```toml
 [plugin]
@@ -87,6 +118,16 @@ downgrade_mode = "power_saving"
 cheap_model = "deepseek-v4-flash"
 downgrade_tasks = ["actor", "sub_actor", "utils", "utils_small", "tool_use"]
 keep_models = []
+
+[inject]                        # 当前档位注入（system reminder）
+enabled = true
+buckets = ["actor"]             # 想让决策模型也知道就加成 ["actor", "sub_actor"]
+name = "mode_switcher_now"
+include_mode_list = true        # 顺带列三档，bot 被问「你有几档」也答得上
+guard = ""                      # 留空＝用内置的「这是背景不是台词」说明
+power_saving_text = "你此刻处于「省电」档：……"
+normal_text = "你此刻处于「常规」档：……"
+insight_text = "你此刻处于「洞悉」档：……"
 ```
 
 几点提醒：
@@ -100,8 +141,10 @@ keep_models = []
   `[interest_threshold] enabled` 关掉。
 - **别和 `form_state` 的「回复意愿闸门」同时装**：两者动的是同一批字段
   （`base_bypass_probability` / `unread_message_bonus`），后者会覆盖前者。
+- **状态注入的默认文案带守岸人的味道**（链接 / 泰缇斯那条线索）——它是从她的知识库里
+  搬出来的一段设定，换成别的角色就在 `[inject]` 里整段替换。
 
-## 五、安装
+## 六、安装
 
 1. 把插件目录放进实例的 `plugins/`（或打包成 `.mfp` 后由市场安装）；
 2. 重启 bot（或热重载插件），日志里会看到一行
@@ -109,7 +152,7 @@ keep_models = []
 3. 首次运行会生成 `config/plugins/mode_switcher/config.toml`，按需要改；
 4. 发一次 `/模式` 确认现值。
 
-## 六、依赖与兼容
+## 七、依赖与兼容
 
 - 零第三方依赖、零 Python 依赖，`dependencies.plugins` 为空（不写「建议搭配」，避免被静默剔除）。
 - 目标聊天插件默认为 `default_chatter`（`neo_default_chatter` 的开关名叫

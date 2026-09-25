@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from src.app.plugin_system.api.log_api import get_logger
 
+from . import inject
 from . import modes
 from . import state as mode_state
 
@@ -63,6 +64,8 @@ async def apply_mode(mode: str, *, persist: bool = True) -> modes.ApplyResult:
     result = modes.apply(key)
     if persist:
         await mode_state.save(settings().state_key, key)
+    # 把「现在在哪一档」注入上下文：换档后模型自己才看得见（只写内存 reminder，不涉及磁盘）
+    inject.sync(key, settings())
     return result
 
 
@@ -107,6 +110,7 @@ async def ensure_applied() -> bool:
 
 
 async def restore() -> None:
-    """还原所有档位改动（插件卸载时调用）。"""
+    """还原所有档位改动（插件卸载时调用）：先撤注入，再写回配置原值。"""
 
+    inject.clear(settings())
     modes.restore()
