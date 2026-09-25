@@ -6,6 +6,7 @@
 - **只改内存，不写配置文件**：配置文件一个字不动，重启回落，卸载还原。
 - **换档时告诉 bot 自己在哪一档**：把当前档位与这一档的意味写进 system reminder，
   bot 不必靠猜，角色卡/知识库里也不用再写死「我现在是省电模式」。
+- **她也能自己拨**：三个工具（`set_mode_*`）让她按场合自己调档，白名单 / 冷却 / 播报可配。
 - **一条命令拨档**：`/模式 省电`、`/模式 常规`、`/模式 洞悉`，只发 `/模式` 看现值。
 
 ## 一、三档各做什么
@@ -88,7 +89,33 @@ system reminder：
 ⚠️ **有了注入，角色卡/知识库就别再写死档位描述**：写一句「她现在处于省电模式」，
 换成常规档之后就是错的。要改三档的语气，改 `[inject]` 里那三段文本。
 
-## 五、配置（`config/plugins/mode_switcher/config.toml`）
+## 五、让 bot 自己拨档（三个工具）
+
+除了主人用 `/模式` 拨，插件还注册三个工具交给 bot 自己判断：
+
+| 工具 | 它自己什么时候会用 |
+| --- | --- |
+| `set_mode_power_saving` | 群里热闹但没在说她、她想安静待着、刚为正经事把链接调高过现在收回来——**默认档，拿不准就待这** |
+| `set_mode_normal` | 日常闲聊、有人正常找她说话、需要跟上话题但还不必全开 |
+| `set_mode_insight` | 奈秋需要她更用心、话题是正事、或他情绪上需要被好好接住时；**不为好玩/炫技/被哄两句就切** |
+
+工具说明里写清了「什么时候用、什么时候别用」——模型调不调工具几乎全看说明。
+调完之后她会照常用自己的方式说话（工具只回一段系统回执，不替她发言）。
+
+闸门在 `[tools]` 里：
+
+```toml
+[tools]
+enabled = true                 # 关掉＝只能主人用 /模式 拨
+allow_power_saving = true
+allow_normal = true
+allow_insight = true           # 最费的一档；关掉＝她再想全开也得等主人点头
+cooldown_minutes = 0           # 两次自主拨档的最小间隔（分钟），防止来回抖
+announce = false               # 切完是否由插件替她在对话里说一句
+announce_text = ""             # 留空＝「（把链接调到「{label}」了。）」
+```
+
+## 六、配置（`config/plugins/mode_switcher/config.toml`）
 
 ```toml
 [plugin]
@@ -128,6 +155,15 @@ guard = ""                      # 留空＝用内置的「这是背景不是台�
 power_saving_text = "你此刻处于「省电」档：……"
 normal_text = "你此刻处于「常规」档：……"
 insight_text = "你此刻处于「洞悉」档：……"
+
+[tools]                         # bot 自主拨档（见第五节）
+enabled = true
+allow_power_saving = true
+allow_normal = true
+allow_insight = true
+cooldown_minutes = 0
+announce = false
+announce_text = ""
 ```
 
 几点提醒：
@@ -144,7 +180,7 @@ insight_text = "你此刻处于「洞悉」档：……"
 - **状态注入的默认文案带守岸人的味道**（链接 / 泰缇斯那条线索）——它是从她的知识库里
   搬出来的一段设定，换成别的角色就在 `[inject]` 里整段替换。
 
-## 六、安装
+## 七、安装
 
 1. 把插件目录放进实例的 `plugins/`（或打包成 `.mfp` 后由市场安装）；
 2. 重启 bot（或热重载插件），日志里会看到一行
@@ -152,7 +188,7 @@ insight_text = "你此刻处于「洞悉」档：……"
 3. 首次运行会生成 `config/plugins/mode_switcher/config.toml`，按需要改；
 4. 发一次 `/模式` 确认现值。
 
-## 七、依赖与兼容
+## 八、依赖与兼容
 
 - 零第三方依赖、零 Python 依赖，`dependencies.plugins` 为空（不写「建议搭配」，避免被静默剔除）。
 - 目标聊天插件默认为 `default_chatter`（`neo_default_chatter` 的开关名叫

@@ -222,6 +222,52 @@ class InjectSection(SectionBase):
     )
 
 
+class ToolsSection(SectionBase):
+    """自主切换：给 bot 三个工具，让它自己拨档（省电 / 常规 / 洞悉）。
+
+    工具说明写在 ``tools.py`` 里（什么时候该用、什么时候别用）；这一节管的是**闸门**：
+    整体开关、单档白名单、冷却与播报。
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="是否给 bot 三个自主拨档工具（关掉＝只能由主人用 /模式 拨）",
+    )
+    allow_power_saving: bool = Field(
+        default=True,
+        description="允许 bot 自己切到省电档（默认档，最省，建议一直开着）",
+    )
+    allow_normal: bool = Field(
+        default=True,
+        description="允许 bot 自己切到常规档",
+    )
+    allow_insight: bool = Field(
+        default=True,
+        description=(
+            "允许 bot 自己切到洞悉档（最费的一档）。\n"
+            "关掉＝她再想全开也得等你用 /模式 点头。"
+        ),
+    )
+    cooldown_minutes: float = Field(
+        default=0.0,
+        description=(
+            "两次「自主拨档」之间的最小间隔（分钟，0＝不限制）。\n"
+            "用来防止她来回抖着换档、把每一档都试一遍。"
+        ),
+    )
+    announce: bool = Field(
+        default=False,
+        description=(
+            "切换后是否由插件替她在对话里说一句（默认关：让她用自己的方式说）。\n"
+            "开启后她切完档会额外发一条短消息，方便你在群里一眼看到。"
+        ),
+    )
+    announce_text: str = Field(
+        default="",
+        description="播报文案，``{label}`` 会替换成档位名；留空用内置的「（把链接调到「{label}」了。）」",
+    )
+
+
 class ModeSwitcherConfig(BaseConfig):
     """mode_switcher 插件配置模型。"""
 
@@ -259,3 +305,4 @@ class ModeSwitcherConfig(BaseConfig):
     )
     models: ModelsSection = Field(default_factory=ModelsSection)
     inject: InjectSection = Field(default_factory=InjectSection)
+    tools: ToolsSection = Field(default_factory=ToolsSection)

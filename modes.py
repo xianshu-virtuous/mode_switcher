@@ -184,6 +184,15 @@ class Settings:
     inject_include_mode_list: bool = True
     inject_guard: str = ""
 
+    # 自主切换（LLM 工具，见 tools.py）
+    tools_enabled: bool = True
+    tool_allowed_modes: list[str] = field(
+        default_factory=lambda: [POWER_SAVING, NORMAL, INSIGHT]
+    )
+    tool_cooldown_minutes: float = 0.0
+    tool_announce: bool = False
+    tool_announce_text: str = ""
+
     def base_offset(self, mode: str) -> float:
         """该档位对基础直通概率的偏移。"""
 
@@ -207,6 +216,11 @@ class Settings:
             and str(mode) == self.unread_open_mode
             and float(self.unread_open_value) > 0.0
         )
+
+    def tool_allows(self, mode: str) -> bool:
+        """bot 能不能自己切到这一档。"""
+
+        return bool(self.tools_enabled and str(mode) in set(self.tool_allowed_modes))
 
 
 _settings: Settings | None = None

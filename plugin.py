@@ -11,6 +11,9 @@
    轮询补应用任务 —— 插件加载顺序是拓扑排序 + 字母序，正常情况下
    ``default_chatter`` 在 ``mode_switcher`` 之前，用不到这条兜底。
 
+另外注册四个组件：``/模式`` 命令（主人用）、以及三个拨档工具
+（``set_mode_power_saving`` / ``set_mode_normal`` / ``set_mode_insight``，bot 自己用）。
+
 卸载时取消补应用任务并把所有改动还原成配置原值（:func:`runtime.restore`）。
 """
 
@@ -24,6 +27,7 @@ from src.app.plugin_system.base import BasePlugin, register_plugin
 from . import modes, runtime
 from .commands import ModeCommand
 from .config import ModeSwitcherConfig
+from .tools import ALL_TOOLS, SetInsightModeTool, SetNormalModeTool, SetPowerSavingModeTool
 
 logger = get_logger("mode_switcher")
 
@@ -40,6 +44,7 @@ def _build_settings(config: ModeSwitcherConfig) -> modes.Settings:
     threshold = config.interest_threshold
     models_cfg = config.models
     inject = config.inject
+    tools = config.tools
 
     return modes.Settings(
         default_mode=str(plugin.default_mode or "").strip(),
@@ -82,6 +87,19 @@ def _build_settings(config: ModeSwitcherConfig) -> modes.Settings:
         },
         inject_include_mode_list=bool(inject.include_mode_list),
         inject_guard=str(inject.guard or ""),
+        tools_enabled=bool(tools.enabled),
+        tool_allowed_modes=[
+            key
+            for key, allowed in (
+                (modes.POWER_SAVING, tools.allow_power_saving),
+                (modes.NORMAL, tools.allow_normal),
+                (modes.INSIGHT, tools.allow_insight),
+            )
+            if allowed
+        ],
+        tool_cooldown_minutes=float(tools.cooldown_minutes),
+        tool_announce=bool(tools.announce),
+        tool_announce_text=str(tools.announce_text or ""),
     )
 
 
@@ -96,9 +114,10 @@ class ModeSwitcherPlugin(BasePlugin):
         "常规档沿用配置里的模型策略、基础直通概率 +0.10、兴趣值回复阈值 -0.05；"
         "洞悉档在常规之上再开放未读消息加成（默认 0.05/条）、阈值再降 0.05。"
         "换档时把「当前在哪一档」注入 system reminder，bot 自己知道状态；"
+        "另给 bot 三个工具，让它按情况自己调档（白名单 + 冷却可配）；"
         "只改内存配置对象、不写配置文件，重启回落、卸载还原；/模式 随时拨档"
     )
-    plugin_version: str = "1.1.0"
+    plugin_version: str = "1.2.0"
     configs: list[type] = [ModeSwitcherConfig]
 
     def __init__(self, config: object = None) -> None:
@@ -108,9 +127,17 @@ class ModeSwitcherPlugin(BasePlugin):
     def get_components(self) -> list[type]:
         """插件被关掉时不注册任何组件（等于整体下线）。"""
 
-        if isinstance(self.config, ModeSwitcherConfig) and not self.config.plugin.enabled:
+        config = self.config
+        if isinstance(config, ModeSwitcherConfig) and not config.plugin.enabled:
             return []
-        return [ModeCommand]
+
+        components: list[type] = [ModeCommand]
+        if isinstance(config, ModeSwitcherConfig):
+            if config.tools.enabled:
+                components.extend(ALL_TOOLS)
+        else:
+            components.extend(ALL_TOOLS)
+        return components
 
     async def on_plugin_loaded(self) -> None:
         """注入设置、读档、应用档位。"""
@@ -133,6 +160,7 @@ class ModeSwitcherPlugin(BasePlugin):
             f"mode_switcher: 档位＝{modes.mode_label(mode)}"
             f"｜已生效：{result.summary()}{detail}"
             f"｜状态注入：{'开' if runtime.settings().inject_enabled else '关'}"
+            f"｜自主拨档工具：{'开' if runtime.settings().tools_enabled else '关'}"
         )
 
         if runtime.settings().gate_enabled and not result.gate:

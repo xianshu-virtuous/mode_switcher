@@ -162,6 +162,12 @@ def main() -> int:
         from mode_switcher.commands import ModeCommand
         from mode_switcher.config import ModeSwitcherConfig
         from mode_switcher.plugin import ModeSwitcherPlugin, _build_settings
+        from mode_switcher.tools import (
+            ALL_TOOLS,
+            SetInsightModeTool,
+            SetNormalModeTool,
+            SetPowerSavingModeTool,
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"[FAIL] 导入 mode_switcher 失败: {exc!r}")
         return 2
@@ -559,7 +565,127 @@ def main() -> int:
     finally:
         inject._store = lambda: reminder_store  # type: ignore[assignment]
 
-    # ── 12. 组件注册表（可选，需要框架 registry 就绪） ─────────────────────
+    # ── 12. 自主拨档工具（三个 set_mode_*） ────────────────────────────────
+    from mode_switcher.tools import ALL_TOOLS
+
+    tool_entries = [
+        item
+        for item in includes
+        if item.get("component_type") == "tool"
+    ]
+    check(
+        "manifest 声明了三个 tool，且名字与类一致",
+        sorted(item.get("component_name") for item in tool_entries)
+        == sorted(tool.name for tool in ALL_TOOLS)
+        and len(tool_entries) == 3,
+        f"{[item.get('component_name') for item in tool_entries]}",
+    )
+    check(
+        "三个工具各自对应一档，且说明写清边界",
+        {tool.target_mode for tool in ALL_TOOLS} == set(modes.MODE_ORDER)
+        and all(len(tool.description) > 40 for tool in ALL_TOOLS)
+        and all(tool.component_type == "tool" for tool in ALL_TOOLS),
+        "、".join(f"{tool.name}→{modes.mode_label(tool.target_mode)}" for tool in ALL_TOOLS),
+    )
+    check(
+        "工具说明提醒「不用报告档位」",
+        all("报告档位" in tool.description for tool in ALL_TOOLS),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            runtime.configure(settings)
+            modes.reset_snapshots()
+            modes.configure(settings)
+            asyncio.run(runtime.apply_mode(modes.POWER_SAVING, persist=False))
+            runtime._last_tool_switch_at = 0.0  # type: ignore[attr-defined]
+
+            sent: list[str] = []
+
+            async def _fake_send(text: str, stream_id: str = "") -> None:
+                sent.append(text)
+
+            real_send = runtime.send_text
+            runtime.send_text = _fake_send  # type: ignore[assignment]
+
+            tool = SetNormalModeTool(plugin)
+            ok, text = asyncio.run(tool.execute())
+            check(
+                "工具切档成功并落到「常规」",
+                ok and modes.current_mode() == modes.NORMAL and "常规" in text,
+                text.splitlines()[0][:60],
+            )
+            check(
+                "工具切档会落盘（存档里是常规）",
+                asyncio.run(state.load(settings.state_key, modes.POWER_SAVING, set(modes.MODES)))
+                == modes.NORMAL,
+            )
+            check(
+                "工具结果声明「这是系统回执，不用念出来」",
+                "不用念出来" in text,
+            )
+            check("默认不开播报（没替她说话）", not sent, f"{sent}")
+
+            ok_same, text_same = asyncio.run(SetNormalModeTool(plugin).execute())
+            check(
+                "已经在目标档位时是空操作",
+                ok_same and "已经" in text_same,
+                text_same[:40],
+            )
+
+            # 白名单：只允许省电档
+            locked = modes.Settings(tool_allowed_modes=[modes.POWER_SAVING])
+            runtime.configure(locked)
+            ok_locked, text_locked = asyncio.run(SetInsightModeTool(plugin).execute())
+            check(
+                "白名单外的档位切不动",
+                (not ok_locked) and modes.current_mode() == modes.NORMAL,
+                text_locked[:40],
+            )
+            runtime.configure(settings)
+
+            # 整体关掉
+            runtime.configure(modes.Settings(tools_enabled=False))
+            ok_off, text_off = asyncio.run(SetInsightModeTool(plugin).execute())
+            check("整体关掉时切不动", (not ok_off) and "关着" in text_off, text_off[:40])
+            runtime.configure(settings)
+
+            # 冷却
+            cooled = modes.Settings(tool_cooldown_minutes=60)
+            runtime.configure(cooled)
+            runtime._last_tool_switch_at = 0.0  # type: ignore[attr-defined]
+            ok_first, _ = asyncio.run(SetInsightModeTool(plugin).execute())
+            ok_second, text_second = asyncio.run(SetPowerSavingModeTool(plugin).execute())
+            check(
+                "冷却期内第二次切档被挡下",
+                ok_first and (not ok_second) and "刚换过档位" in text_second,
+                text_second[:40],
+            )
+
+            # 播报
+            announcing = modes.Settings(tool_announce=True, tool_cooldown_minutes=0.0)
+            runtime.configure(announcing)
+            runtime._last_tool_switch_at = 0.0  # type: ignore[attr-defined]
+            sent.clear()
+            ok_ann, _ = asyncio.run(
+                runtime.switch_from_tool(modes.POWER_SAVING, stream_id="test:stream")
+            )
+            check(
+                "开播报时替她说一句（带档位名）",
+                ok_ann and len(sent) == 1 and "省电" in sent[0],
+                f"{sent}",
+            )
+
+            runtime.send_text = real_send  # type: ignore[assignment]
+            runtime.configure(settings)
+            runtime._last_tool_switch_at = 0.0  # type: ignore[attr-defined]
+            asyncio.run(runtime.apply_mode(modes.POWER_SAVING, persist=False))
+        finally:
+            os.chdir(cwd)
+
+    # ── 13. 组件注册表（可选，需要框架 registry 就绪） ─────────────────────
     try:
         from src.core.components.registry import get_global_registry
 
